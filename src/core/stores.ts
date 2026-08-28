@@ -10,9 +10,8 @@ export async function storeMetadata(store: string): Promise<unknown> {
   return prune({ store_id: id, name: clean(page.find(".client-name").first().text()), tagline: clean(page.find(".client-tagline").first().text()), rating: numeric(page.find(".rating-pill .num").first().text()), reviews_last_year: numeric(stats[1]), reviews_total: numeric(stats[2]), since: clean(page.find(".since-zap").first().text()), contact, categories: page.find(".also-find-under-list a").map((_, element) => clean($(element).text())).get(), url: `${BASE_URL}/clientcard.aspx?siteid=${id}` });
 }
 
-export async function storeReviews(store: string, page: number): Promise<unknown> {
+export async function storeReviews(store: string, page: number, limit: number): Promise<unknown> {
   const id = extractId(store, "siteid"); const $ = load((await request("/clientcard.aspx", { params: { siteid: id, pageinfo: page } })).text);
-  const reviews = $(".review-card").map((_, element) => { const node = $(element); return prune({ review_id: node.attr("data-review-id"), author: clean(node.find(".reviewer-name").text()), date: clean(node.find(".reviewer-date").text()), product: clean(node.find(".product-meta .val").text()), body: clean(node.find(".review-text").text()), helpful: numeric(node.find('[data-helpful="true"] .count').text()), not_helpful: numeric(node.find('[data-helpful="false"] .count').text()) }); }).get();
+  const reviews = $(".review-card").slice(0, limit).map((_, element) => { const node = $(element); return prune({ review_id: node.attr("data-review-id"), author: clean(node.find(".reviewer-name").text()), date: clean(node.find(".reviewer-date").text()), product: clean(node.find(".product-meta .val").text()), body: clean(node.find(".review-text").text()), helpful: numeric(node.find('[data-helpful="true"] .count').text()), not_helpful: numeric(node.find('[data-helpful="false"] .count').text()) }); }).get();
   return { store_id: id, total: numeric($(".reviews-count").first().text()) ?? reviews.length, page, reviews, url: `${BASE_URL}/clientcard.aspx?siteid=${id}` };
 }
-

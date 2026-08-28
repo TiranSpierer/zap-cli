@@ -20,7 +20,7 @@ zap-cli product search "iphone 17"
 zap-cli product search "oled" --category e-tv --sort price
 zap-cli product search --category e-tv --filter 189989=190050 --filter 4004=8568084
 zap-cli product metadata <model-id-or-url>
-zap-cli product offers <model-id-or-url> --market regular --sort price
+zap-cli product offers <model-id-or-name-or-url> --market regular --sort price
 zap-cli product specs <model-id-or-url>
 zap-cli product reviews <model-id-or-url> --page 1
 zap-cli product history <model-id-or-url>
@@ -28,9 +28,10 @@ zap-cli product similar <model-id-or-url>
 zap-cli product images <model-id-or-url>
 zap-cli product local-stores <model-id-or-url>
 zap-cli product compare <model-id> <model-id>
+zap-cli product raw <model-id> --resource model
 ```
 
-Organic models are returned by default. Use `--include-promoted` to inspect paid placements separately. Offer output keeps regular and Eilat offers separate; delivered price includes known shipping for regular delivery offers.
+Search keeps canonical models and featured store offers separate; sponsored bids are opt-in. Offer output keeps regular, Eilat, and refurbished markets separate and reports total price, structured importer status, warranty, and seller reputation. Use `--details` for full merchant descriptions.
 
 </details>
 

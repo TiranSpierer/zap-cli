@@ -1,22 +1,37 @@
 import { load, type Cheerio, type CheerioAPI } from "cheerio";
 import type { AnyNode } from "domhandler";
 import { request } from "./client.js";
-import { BASE_URL, clean, extractId, numeric, prune } from "./common.js";
+import { BASE_URL, clean, numeric, prune } from "./common.js";
+import { resolveModel } from "./products.js";
 
-function review($: CheerioAPI, node: Cheerio<AnyNode>): unknown {
-  const style = node.find(".RateStars span").first().attr("style"); const width = style?.match(/width:\s*(\d+)/)?.[1];
-  const opinions = node.find(".opinion .text").map((_, element) => clean($(element).text())).get().filter(Boolean);
+function review($: CheerioAPI, node: Cheerio<AnyNode>, structured: any): unknown {
+  const opinions: Record<string, string> = {};
+  node.find(".opinion").each((_, element) => {
+    const item = $(element); const label = item.find("img").attr("alt"); const value = clean(item.find(".text").text());
+    if (label && value) opinions[label] = value;
+  });
   return prune({
     review_id: node.find("[data-reviewid]").first().attr("data-reviewid"), title: clean(node.find(".ReviewTitle").first().text()),
-    body: clean(node.find(".ReviewTxt").first().text()), pros: opinions[0], cons: opinions.length > 1 ? opinions.at(-1) : undefined,
-    author: clean(node.find(".WriterName").first().text()), date: clean(node.find(".ReviewDate").first().text()), score: width ? Number(width) / 18 : undefined,
+    body: clean(structured?.reviewBody ?? node.find(".ReviewTxt").first().text()), pros: opinions["יתרונות"], neutral: opinions["ניטראלי"], cons: opinions["חסרונות"],
+    author: clean(structured?.author?.name ?? structured?.author ?? node.find(".WriterName").first().text()), date: structured?.datePublished ?? clean(node.find(".ReviewDate").first().text()),
+    score: numeric(structured?.reviewRating?.ratingValue),
   });
 }
 
-export async function productReviews(model: string, page: number, sort: string): Promise<unknown> {
-  const id = extractId(model, "modelid"); const orderby: Record<string, string> = { date: "insertiondatedesc", rating: "userscoredesc", "rating-asc": "userscoreasc" };
-  const $ = load((await request("/ratemodel.aspx", { params: { modelid: id, pageinfo: page, orderby: orderby[sort] } })).text);
-  const reviews = $(".reviewBody").map((_, element) => review($, $(element))).get();
-  return { model_id: id, total: numeric($(".count-store").first().text()) ?? reviews.length, page, reviews, url: `${BASE_URL}/ratemodel.aspx?modelid=${id}` };
+function structuredReviews($: CheerioAPI): any[] {
+  const found: any[] = [];
+  $('script[type="application/ld+json"]').each((_, element) => {
+    try { const data = JSON.parse($(element).text()); const values = Array.isArray(data?.review) ? data.review : data?.review ? [data.review] : []; found.push(...values); } catch { /* invalid third-party JSON-LD */ }
+  });
+  return found;
 }
 
+export async function productReviews(model: string, page: number, sort: string, limit: number): Promise<unknown> {
+  const id = await resolveModel(model); const orderby: Record<string, string> = { date: "insertiondatedesc", rating: "userscoredesc", "rating-asc": "userscoreasc" };
+  const $ = load((await request("/ratemodel.aspx", { params: { modelid: id, pageinfo: page, orderby: orderby[sort] } })).text);
+  const structured = structuredReviews($);
+  const reviews = $(".reviewBody").slice(0, limit).map((index, element) => review($, $(element), structured[index])).get();
+  const heading = clean($("#reviewsPage .count-line-review .count-store").first().text());
+  const total = numeric(heading) ?? reviews.length;
+  return { model_id: id, total: reviews.length ? total : 0, page, reviews, note: !reviews.length ? "No product reviews found." : undefined, url: `${BASE_URL}/ratemodel.aspx?modelid=${id}` };
+}
