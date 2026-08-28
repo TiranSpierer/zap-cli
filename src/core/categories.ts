@@ -19,7 +19,12 @@ function matches(query: string, value: string): boolean {
   const needle = query.toLowerCase(); const haystack = value.toLowerCase();
   if (haystack.includes(needle)) return true;
   const tokens = needle.split(/\s+/).filter((token) => token.length > 1);
-  if (tokens.length > 1 && tokens.every((token) => haystack.includes(token) || haystack.includes(`ו${token}`))) return true;
+  const tokenMatches = (token: string) => {
+    if (haystack.includes(token) || haystack.includes(`ו${token}`)) return true;
+    for (let length = Math.max(1, token.length - 1); length <= token.length + 1; length++) for (let index = 0; index + length <= haystack.length; index++) if (distance(token, haystack.slice(index, index + length)) <= 1) return true;
+    return false;
+  };
+  if (tokens.length > 1 && tokens.every(tokenMatches)) return true;
   if (needle.length < 4) return false;
   for (let length = Math.max(1, needle.length - 1); length <= needle.length + 1; length++) {
     for (let index = 0; index + length <= haystack.length; index++) if (distance(needle, haystack.slice(index, index + length)) <= 1) return true;

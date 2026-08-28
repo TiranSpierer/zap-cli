@@ -1,11 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { extname, join } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { load, type Cheerio, type CheerioAPI } from "cheerio";
 import type { AnyNode } from "domhandler";
 import { request } from "./client.js";
 import { BASE_URL, clean, extractId, numeric, prune, text } from "./common.js";
-import { categoryFilters } from "./categories.js";
+import { categoryFilters, listCategories } from "./categories.js";
 
 const SORTS: Record<string, string> = { new: "snum", price: "price", "price-desc": "price_desc", rating: "rate", reviews: "ratesum" };
 
@@ -75,7 +75,7 @@ export async function searchProducts(args: {
     const metadata = await productMetadata(directModelId) as any;
     models.set(directModelId, {
       model_id: directModelId, name: metadata.name, brand: metadata.brand,
-      price_from: metadata.price_range?.min, rating: metadata.rating, reviews: metadata.reviews,
+      price_from: metadata.comparable_offer_range?.min ?? metadata.price_range_reported_by_zap?.min, rating: metadata.rating, reviews: metadata.reviews,
       image: metadata.images?.[0], url: metadata.url,
     });
   }
@@ -89,11 +89,11 @@ export async function searchProducts(args: {
       const row = current.$(element); const value = modelSummary(current.$, row) as any; const offerId = value?.model_id;
       if (!offerId) return;
       const reviewUrl = row.find('a[href*="ratemodel.aspx?modelid="]').first().attr("href");
-      featuredOffers.set(offerId, prune({
+      featuredOffers.set(row.attr("data-gid") || offerId, prune({
         offer_id: offerId, name: value.name, brand: value.brand, price: value.price_from, store: row.attr("data-site-name"),
         store_id: row.attr("data-site-id"), store_rating: value.rating, store_reviews: value.reviews, gid: row.attr("data-gid"),
         related_model_id: reviewUrl ? new URL(reviewUrl, BASE_URL).searchParams.get("modelid") : undefined,
-        promoted: true, zap_url: `${BASE_URL}/fs.aspx?pid=${offerId}&sog=${row.attr("data-sog")}`,
+        zap_url: `${BASE_URL}/fs.aspx?pid=${offerId}&sog=${row.attr("data-sog")}`,
       }));
     });
     if (args.includeSponsored) current.$(".BidsContainer a[data-bid-id]").each((_, element) => {
@@ -115,6 +115,9 @@ export async function searchProducts(args: {
   }
   if (args.sort === "price") modelValues.sort((a, b) => (a.price_from ?? Infinity) - (b.price_from ?? Infinity));
   if (args.sort === "price-desc") modelValues.sort((a, b) => (b.price_from ?? -Infinity) - (a.price_from ?? -Infinity));
+  const storeOfferValues = [...featuredOffers.values()];
+  if (args.sort === "price") storeOfferValues.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+  if (args.sort === "price-desc") storeOfferValues.sort((a, b) => (b.price ?? -Infinity) - (a.price ?? -Infinity));
   const output: Record<string, unknown> = {
     query: query || undefined,
     category: new URL(first.url).searchParams.get("sog") ?? args.category,
@@ -122,12 +125,26 @@ export async function searchProducts(args: {
     total_reported: numeric(totalText) ?? models.size + featuredOffers.size,
     page: args.page,
     models: modelValues.slice(0, args.limit),
-    store_offers: [...featuredOffers.values()].slice(0, args.limit),
+    store_offers: storeOfferValues.slice(0, args.limit),
     returned: { models: Math.min(modelValues.length, args.limit), store_offers: Math.min(featuredOffers.size, args.limit) },
     resolved_url: first.url,
+    note: !models.size && !featuredOffers.size ? "No products found." : undefined,
   };
   if (args.includeSponsored) output.sponsored_offers = [...sponsored.values()];
-  if (!models.size && query.split(/\s+/).length > 1 && !args.category) {
+  const queryTokens = clean(query).split(/\s+/).filter((token) => token.length >= 3);
+  const edgeTokens = [queryTokens[0], queryTokens.at(-1)].filter(Boolean) as string[];
+  const edgeMatched = modelValues.some((item) => edgeTokens.some((token) => clean(item.name).toLowerCase().includes(token.toLowerCase())));
+  if (!args.category && queryTokens.length > 1 && (!models.size || !edgeMatched)) {
+    const catalog = await listCategories() as any;
+    const candidates = (catalog.groups ?? []).flatMap((group: any) => group.categories ?? []).map((category: any) => ({ ...category, score: queryTokens.filter((token) => `${category.code} ${category.name}`.toLowerCase().includes(token.toLowerCase())).length })).filter((category: any) => category.score > 0).sort((a: any, b: any) => b.score - a.score);
+    if (candidates.length && candidates[0].score > (candidates[1]?.score ?? 0)) {
+      const categoryText = `${candidates[0].code} ${candidates[0].name}`.toLowerCase();
+      const remaining = queryTokens.filter((token) => !categoryText.includes(token.toLowerCase()));
+      const keyword = /^[\x00-\x7F]+$/.test(query) ? remaining[0] : remaining.at(-1);
+      if (keyword) output.category_fallback = await searchProducts({ ...args, query: keyword, category: candidates[0].code, allPages: false, includeSponsored: false });
+    }
+  }
+  if (!models.size && query.split(/\s+/).length > 1 && !args.category && !output.category_fallback) {
     const fallbackQuery = query.split(/\s+/).slice(0, -1).join(" ");
     const fallback = await searchProducts({ ...args, query: fallbackQuery, allPages: false, includeSponsored: false });
     output.fallback = { query: fallbackQuery, ...(fallback as object) };
@@ -162,6 +179,10 @@ export async function resolveModel(value: string): Promise<string> {
   const needle = clean(value).toLowerCase();
   const exact = models.filter((item: any) => clean(item.name).toLowerCase().includes(needle));
   if (exact.length === 1) return exact[0].model_id;
+  if (exact.length > 1) return exact.sort((a: any, b: any) => clean(a.name).length - clean(b.name).length)[0].model_id;
+  const tokens = needle.split(/\s+/).filter((token) => token.length > 1);
+  const ranked = models.map((item: any) => ({ item, score: tokens.filter((token) => clean(item.name).toLowerCase().includes(token)).length })).sort((a: any, b: any) => b.score - a.score);
+  if (ranked[0]?.score > (ranked[1]?.score ?? 0)) return ranked[0].item.model_id;
   const choices = models.slice(0, 5).map((item: any) => `${item.model_id}: ${item.name}`).join("; ");
   throw new Error(choices ? `model name is ambiguous; choose an ID: ${choices}` : `no Zap model found for "${value}"`);
 }
@@ -176,12 +197,17 @@ export async function productMetadata(model: string): Promise<unknown> {
   const $ = load(response.text);
   const raw = personalization($);
   const images = $("#carouselModel .carousel-item img").map((_, element) => $(element).attr("src")).get().filter(Boolean);
-  return prune({ model_id: id, name: clean($("h1").first().text()) || raw.Title, brand: raw.Brand, category: raw.SubCategory, category_name: raw.SubCategoryHebName, available: raw.SaleOpen, price_range: { min: raw.MinPrice, max: raw.MaxPrice }, rating: raw.NormalizeRate, reviews: raw.ReviewsAmount, images: [...new Set(images)], url: `${BASE_URL}/model.aspx?modelid=${id}` });
+  const offerPrices = [...new Set($(".compare-items-group[data-group-sale-type-name='Regular'] .compare-item-row").map((_, element) => numeric($(element).attr("data-product-price"))).get().filter((value): value is number => value !== undefined))].sort((a, b) => a - b);
+  const median = offerPrices[Math.floor(offerPrices.length / 2)];
+  const comparable = median && offerPrices.length >= 3 ? offerPrices.filter((price) => price >= median * 0.35) : offerPrices;
+  return prune({ model_id: id, name: clean($("h1").first().text()) || raw.Title, brand: raw.Brand, category: raw.SubCategory, category_name: raw.SubCategoryHebName, available: raw.SaleOpen, price_range_reported_by_zap: { min: raw.MinPrice, max: raw.MaxPrice }, comparable_offer_range: comparable.length ? { min: Math.min(...comparable), max: Math.max(...comparable) } : undefined, price_anomalies_detected: offerPrices.length - comparable.length || undefined, rating: raw.NormalizeRate, reviews: raw.ReviewsAmount, images: [...new Set(images)], url: `${BASE_URL}/model.aspx?modelid=${id}` });
 }
 
 function offerFrom($: CheerioAPI, row: Cheerio<AnyNode>, market: string, details: boolean): any {
   const price = numeric(row.attr("data-product-price"));
-  const shipping = numeric(row.attr("data-ship-price"));
+  const shippingRaw = numeric(row.attr("data-ship-price"));
+  const shipping = shippingRaw !== undefined && shippingRaw >= 0 ? shippingRaw : undefined;
+  const deliveryDaysRaw = numeric(row.attr("data-delivery-time"));
   const merchantHref = row.find('a[href*="clientcard.aspx?siteid="]').first().attr("href");
   const delivery = row.find(".supply-title").map((_, element) => clean($(element).text())).get().filter(Boolean);
   const official = row.attr("data-official-importer") === "true";
@@ -193,8 +219,8 @@ function offerFrom($: CheerioAPI, row: Cheerio<AnyNode>, market: string, details
     offer_id: row.attr("data-pid"), gid: row.attr("data-gid"), store: row.attr("data-site-name"),
     listing_store_id: row.attr("data-site-id"), merchant_id: merchantHref ? new URL(merchantHref, BASE_URL).searchParams.get("siteid") : undefined,
     price, shipping, total_price: price !== undefined && shipping !== undefined ? price + shipping : price,
-    fulfillment: market === "eilat" ? "Eilat purchase/pickup" : "delivery", delivery_days: numeric(row.attr("data-delivery-time")), delivery,
-    description: details ? row.attr("data-description") : undefined, tag: row.attr("data-marketing-tags"),
+    fulfillment: market === "eilat" ? "Eilat purchase/pickup" : "delivery", delivery_days: deliveryDaysRaw !== undefined && deliveryDaysRaw >= 0 ? deliveryDaysRaw : undefined, delivery,
+    description: details ? row.attr("data-description") : undefined, tags: row.attr("data-marketing-tags") ? [row.attr("data-marketing-tags")] : undefined,
     store_rating: numeric(row.attr("data-total-rank")), store_rating_display: numeric(row.attr("data-site-rate")),
     store_reviews_last_year: numeric(row.attr("data-review-last-year")), store_reviews_total: numeric(row.attr("data-review-total")),
     warranty: warrantyLabel,
@@ -204,11 +230,12 @@ function offerFrom($: CheerioAPI, row: Cheerio<AnyNode>, market: string, details
   });
 }
 
-export async function productOffers(model: string, options: { market: string; sort: string; limit: number; details: boolean }): Promise<unknown> {
+export async function productOffers(model: string, options: { market: string; sort: string; limit: number; details: boolean; includeAnomalies: boolean }): Promise<unknown> {
   const id = await resolveModel(model);
   const response = await request("/model.aspx", { params: { modelid: id, ...(options.market === "eilat" ? { iseilat: "true" } : {}) } });
   const $ = load(response.text);
   const markets: Record<string, unknown[]> = {};
+  const anomaliesExcluded: Record<string, number> = {};
   $(".compare-items-group").each((_, element) => {
     const group = $(element);
     const market = (group.attr("data-group-sale-type-name") ?? "regular").toLowerCase();
@@ -224,17 +251,24 @@ export async function productOffers(model: string, options: { market: string; so
           if (previous[field] !== undefined && offer[field] !== undefined && previous[field] !== offer[field]) conflicts[field] = [...new Set([previous[field], offer[field]])];
         }
         const richer = offer.merchant_id ? offer : previous;
-        merged.set(key, { ...previous, ...richer, ...(Object.keys(conflicts).length ? { data_conflicts: conflicts } : {}) });
+        const tags = [...new Set([...(previous.tags ?? []), ...(offer.tags ?? [])])];
+        merged.set(key, { ...previous, ...richer, ...(tags.length ? { tags } : {}), ...(Object.keys(conflicts).length ? { data_conflicts: conflicts } : {}) });
       }
     }
-    const offers = [...merged.values()];
+    let offers = [...merged.values()];
+    const prices = offers.map((offer) => offer.total_price).filter((price): price is number => typeof price === "number").sort((a, b) => a - b);
+    const median = prices[Math.floor(prices.length / 2)];
+    const anomalous = median && prices.length >= 3 ? offers.filter((offer) => offer.total_price < median * 0.35) : [];
+    for (const offer of anomalous) offer.possible_mismatch = true;
+    if (!options.includeAnomalies) offers = offers.filter((offer) => !offer.possible_mismatch);
     if (options.sort === "price") offers.sort((a: any, b: any) => (a.total_price ?? a.price) - (b.total_price ?? b.price));
     markets[market] = offers.slice(0, options.limit);
+    if (anomalous.length && !options.includeAnomalies) anomaliesExcluded[market] = anomalous.length;
   });
   if (!(options.market in markets) && options.market !== "all") markets[options.market] = [];
   if (options.market === "all") for (const market of ["regular", "refurbish", "eilat"]) markets[market] ??= [];
-  const values = Object.values(markets).flat();
-  return { model_id: id, markets, returned: Object.fromEntries(Object.entries(markets).map(([key, items]) => [key, items.length])), importer_note: values.some((offer: any) => offer.importer === "unknown") ? "Zap's structured importer flags do not identify these offers; status is unknown and is not inferred from marketing text." : undefined, note: values.length === 0 ? "No offers found for the selected market." : undefined, url: `${BASE_URL}/model.aspx?modelid=${id}` };
+  const values = Object.values(markets).flat().filter((value) => typeof value === "object");
+  return { model_id: id, markets, returned: Object.fromEntries(Object.entries(markets).map(([key, items]) => [key, items.length])), anomalies_excluded: Object.keys(anomaliesExcluded).length ? anomaliesExcluded : undefined, comparison_note: values.length ? "Zap may group different bundles, accessories, conditions, or warranties under one model; verify each offer before comparing totals." : undefined, importer_note: values.some((offer: any) => offer.importer === "unknown") ? "Zap's structured importer flags do not identify these offers; status is unknown and is not inferred from marketing text." : undefined, note: values.length === 0 ? "No offers found for the selected market." : undefined, url: `${BASE_URL}/model.aspx?modelid=${id}` };
 }
 
 export async function productSpecs(model: string): Promise<unknown> {
@@ -254,7 +288,8 @@ export async function productSpecs(model: string): Promise<unknown> {
     }
   });
   if (current.specs.length) sections.push(current);
-  return { model_id: id, sections, url: `${BASE_URL}/compmodels.aspx?modelid=${id}` };
+  const mergedSections = [...new Map(sections.map((section) => [section.section, { section: section.section, specs: sections.filter((item) => item.section === section.section).flatMap((item) => item.specs) }])).values()];
+  return { model_id: id, sections: mergedSections, source_note: "Specifications are limited to fields Zap provides for this canonical model.", url: `${BASE_URL}/compmodels.aspx?modelid=${id}` };
 }
 
 export async function productHistory(model: string): Promise<unknown> {
@@ -262,7 +297,8 @@ export async function productHistory(model: string): Promise<unknown> {
   const payload = JSON.parse((await request("/modelpage/getpricechart", { params: { modelid: id, includepopularity: "true" } })).text);
   const chart = JSON.parse(payload.json ?? "{}");
   const points = (chart.rows ?? []).map((row: any) => prune({ date: row.c?.[0]?.v, price: row.c?.[1]?.v, popularity: row.c?.[2]?.f }));
-  return { model_id: id, points };
+  const prices = points.map((point: any) => point.price).filter((price: unknown): price is number => typeof price === "number");
+  return { model_id: id, points, summary: prices.length ? { min: Math.min(...prices), max: Math.max(...prices), latest: prices.at(-1), change: prices.at(-1)! - prices[0] } : undefined, source_note: "Zap does not identify which merchant offer or bundle produced each historical point." };
 }
 
 export async function similarProducts(model: string, limit: number): Promise<unknown> {
@@ -287,6 +323,7 @@ export async function productImages(model: string): Promise<unknown> {
 export async function compareProducts(models: string[]): Promise<unknown> {
   const ids = await Promise.all(models.map(resolveModel));
   if (ids.length < 2 || ids.length > 4) throw new Error("compare requires 2 to 4 models");
+  if (new Set(ids).size !== ids.length) throw new Error("compare requires distinct models");
   const metadata = await Promise.all(ids.map(productMetadata)) as any[];
   if (new Set(metadata.map((item) => item.category)).size !== 1) throw new Error("Zap compares only models in the same category");
   const specResults = await Promise.all(ids.map(productSpecs)) as any[];
@@ -301,11 +338,11 @@ export async function localStores(model: string): Promise<unknown> {
   return { model_id: id, offers: $(".compare-item-row").map((_, row) => offerFrom($, $(row), "local", false)).get(), url: `${BASE_URL}/modelofflinestores.aspx?modelid=${id}` };
 }
 
-export async function rawProductPage(model: string, resource: string): Promise<unknown> {
+export async function rawProductPage(model: string, resource: string, output?: string): Promise<unknown> {
   const id = await resolveModel(model);
   const paths: Record<string, string> = { model: "/model.aspx", specs: "/compmodels.aspx", reviews: "/ratemodel.aspx", "local-stores": "/modelofflinestores.aspx" };
   const response = await request(paths[resource], { params: { modelid: id } });
   const directory = join(tmpdir(), "zap-cli", id); await mkdir(directory, { recursive: true });
-  const path = join(directory, `${resource}.html`); await writeFile(path, response.buffer);
+  const path = output ? resolve(output) : join(directory, `${resource}.html`); await mkdir(dirname(path), { recursive: true }); await writeFile(path, response.buffer);
   return { model_id: id, resource, path, url: response.url };
 }

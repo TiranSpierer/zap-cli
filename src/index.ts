@@ -33,6 +33,7 @@ product.command("offers <model>").description("List store offers for a product")
   .addOption(new Option("--sort <order>", "offer order").choices(["recommendation", "price"]).default("recommendation"))
   .option("--limit <number>", "maximum offers per market", positive, 20)
   .option("--details", "include full merchant descriptions")
+  .option("--include-anomalies", "include extreme price outliers that may be mismatched accessories")
   .action((model, options) => output(productOffers(model, options)));
 product.command("reviews <model>").description("Read product reviews").option("--page <number>", "review page", positive, 1)
   .option("--limit <number>", "maximum reviews", positive, 10)
@@ -46,7 +47,7 @@ product.command("raw <model>").description("Save an unmodified Zap HTML page for
 
 const category = program.command("category").description("Category operations");
 category.command("list [query]").description("List Zap product categories").action((query = "") => output(listCategories(query)));
-category.command("filters <category>").description("List filters for a category").option("--query <query>", "restrict facets to a query").option("--all-options", "expand every option in each filter group").action((code, options) => output(categoryFilters(code, options.query, Boolean(options.allOptions))));
+category.command("filters <category>").description("List filters for a category").option("--query <query>", "restrict facets to a query").option("--all-options", "expand every option in each filter group").option("--no-all-options", "deprecated; compact output is already the default").action((code, options) => output(categoryFilters(code, options.query, Boolean(options.allOptions))));
 
 const store = program.command("store").description("Store operations");
 store.command("search <query>").description("Search Zap stores by name").option("--limit <number>", "maximum stores", positive, 10).action((query, options) => output(searchStores(query, options.limit)));

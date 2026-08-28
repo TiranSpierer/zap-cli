@@ -19,6 +19,7 @@ npx -y git+https://github.com/TiranSpierer/zap-cli.git zap-cli --help
 zap-cli product search "iphone 17"
 zap-cli product search "oled" --category e-tv --sort price
 zap-cli product search --category e-tv --filter 189989=190050 --filter 4004=8568084
+zap-cli product search --category e-tv --filter brand=Samsung
 zap-cli product metadata <model-id-or-url>
 zap-cli product offers <model-id-or-name-or-url> --market regular --sort price
 zap-cli product specs <model-id-or-url>
@@ -41,6 +42,8 @@ Search keeps canonical models and featured store offers separate; sponsored bids
 ```bash
 zap-cli category list
 zap-cli category filters e-tv
+zap-cli category filters e-tv --all-options
+zap-cli store search "ShipShop"
 zap-cli store metadata <site-id-or-url>
 zap-cli store reviews <site-id-or-url> --page 2
 zap-cli suggest "iphone 17"

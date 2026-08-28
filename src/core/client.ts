@@ -30,6 +30,7 @@ export async function request(
     if (value !== undefined) url.searchParams.set(key, String(value));
   }
   let body = options.body === undefined ? undefined : JSON.stringify(options.body);
+  let transientRetries = 0;
   for (let redirects = 0; redirects <= 8; redirects++) {
     let response: Response;
     try {
@@ -50,6 +51,12 @@ export async function request(
       throw new Error(`Could not reach Zap: ${error instanceof Error ? error.message : String(error)}`);
     }
     rememberCookies(response);
+    if (response.status === 403 && transientRetries < 3) {
+      transientRetries++;
+      await new Promise((resolve) => setTimeout(resolve, 250 * transientRetries));
+      redirects--;
+      continue;
+    }
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       if (!location) throw new Error(`Zap redirect ${response.status} had no location`);
