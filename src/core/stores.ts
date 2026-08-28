@@ -3,7 +3,10 @@ import { request } from "./client.js";
 import { BASE_URL, clean, extractId, numeric, prune } from "./common.js";
 
 export async function searchStores(query: string, limit: number): Promise<unknown> {
-  const $ = load((await request("/modelsstore.aspx", { params: { sog: "g-stores", keyword: query } })).text);
+  let response;
+  try { response = await request("/modelsstore.aspx", { params: { sog: "g-stores", keyword: query } }); }
+  catch { return { query, stores: [], note: "No Zap stores found." }; }
+  const $ = load(response.text);
   const stores = $(".compare-item-row[data-site-id]").slice(0, limit).map((_, element) => {
     const row = $(element); const id = row.attr("data-site-id"); const link = row.find('a[href*="clientcard.aspx?siteid="]').first();
     return prune({ store_id: id, name: clean(row.find(".product-name, .store-name, h2, h3").first().text()) || clean(link.attr("aria-label")), rating: numeric(row.find(".rate-score, .num").first().text()), url: id ? `${BASE_URL}/clientcard.aspx?siteid=${id}` : undefined });
@@ -13,7 +16,9 @@ export async function searchStores(query: string, limit: number): Promise<unknow
 
 async function resolveStore(value: string): Promise<string> {
   try { return extractId(value, "siteid"); } catch { /* resolve by directory */ }
-  const result = await searchStores(value, 10) as any; const stores = result.stores ?? [];
+  let result = await searchStores(value, 10) as any; let stores = result.stores ?? [];
+  const simplified = clean(value).replace(/^רשת\s+/i, "");
+  if (!stores.length && simplified !== clean(value)) { result = await searchStores(simplified, 10) as any; stores = result.stores ?? []; }
   if (stores.length === 1) return stores[0].store_id;
   const needle = clean(value).toLowerCase(); const exact = stores.filter((item: any) => clean(item.name).toLowerCase().includes(needle));
   if (exact.length === 1) return exact[0].store_id;

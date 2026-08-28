@@ -132,16 +132,21 @@ export async function searchProducts(args: {
   };
   if (args.includeSponsored) output.sponsored_offers = [...sponsored.values()];
   const queryTokens = clean(query).split(/\s+/).filter((token) => token.length >= 3);
-  const edgeTokens = [queryTokens[0], queryTokens.at(-1)].filter(Boolean) as string[];
-  const edgeMatched = modelValues.some((item) => edgeTokens.some((token) => clean(item.name).toLowerCase().includes(token.toLowerCase())));
+  const anchorToken = /^[\x00-\x7F]+$/.test(query) ? queryTokens[0] : queryTokens.at(-1);
+  const edgeMatched = !anchorToken || modelValues.some((item) => clean(item.name).toLowerCase().includes(anchorToken.toLowerCase()));
   if (!args.category && queryTokens.length > 1 && (!models.size || !edgeMatched)) {
-    const catalog = await listCategories() as any;
-    const candidates = (catalog.groups ?? []).flatMap((group: any) => group.categories ?? []).map((category: any) => ({ ...category, score: queryTokens.filter((token) => `${category.code} ${category.name}`.toLowerCase().includes(token.toLowerCase())).length })).filter((category: any) => category.score > 0).sort((a: any, b: any) => b.score - a.score);
-    if (candidates.length && candidates[0].score > (candidates[1]?.score ?? 0)) {
-      const categoryText = `${candidates[0].code} ${candidates[0].name}`.toLowerCase();
+    const resolvedCategory = new URL(first.url).searchParams.get("sog");
+    if (resolvedCategory && anchorToken) {
+      output.category_fallback = await searchProducts({ ...args, query: anchorToken, category: resolvedCategory, allPages: false, includeSponsored: false });
+    } else {
+      const catalog = await listCategories() as any;
+      const candidates = (catalog.groups ?? []).flatMap((group: any) => group.categories ?? []).map((category: any) => ({ ...category, score: queryTokens.filter((token) => `${category.code} ${category.name}`.toLowerCase().includes(token.toLowerCase())).length })).filter((category: any) => category.score > 0).sort((a: any, b: any) => b.score - a.score);
+      if (candidates.length && candidates[0].score > (candidates[1]?.score ?? 0)) {
+        const categoryText = `${candidates[0].code} ${candidates[0].name}`.toLowerCase();
       const remaining = queryTokens.filter((token) => !categoryText.includes(token.toLowerCase()));
       const keyword = /^[\x00-\x7F]+$/.test(query) ? remaining[0] : remaining.at(-1);
       if (keyword) output.category_fallback = await searchProducts({ ...args, query: keyword, category: candidates[0].code, allPages: false, includeSponsored: false });
+      }
     }
   }
   if (!models.size && query.split(/\s+/).length > 1 && !args.category && !output.category_fallback) {

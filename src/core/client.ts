@@ -51,9 +51,10 @@ export async function request(
       throw new Error(`Could not reach Zap: ${error instanceof Error ? error.message : String(error)}`);
     }
     rememberCookies(response);
-    if (response.status === 403 && transientRetries < 3) {
+    if (response.status === 403 && transientRetries < 8) {
       transientRetries++;
-      await new Promise((resolve) => setTimeout(resolve, 250 * transientRetries));
+      cookies.clear();
+      await new Promise((resolve) => setTimeout(resolve, Math.min(400 * transientRetries, 3_000)));
       redirects--;
       continue;
     }
@@ -65,7 +66,7 @@ export async function request(
       continue;
     }
     if (response.status === 404) throw new Error("Zap resource not found");
-    if (!response.ok) throw new Error(`Zap returned HTTP ${response.status}`);
+    if (!response.ok) throw new Error(response.status === 403 ? "Zap temporarily blocked the request after retries" : `Zap returned HTTP ${response.status}`);
     const buffer = Buffer.from(await response.arrayBuffer());
     const contentType = response.headers.get("content-type") ?? "";
     const charset = contentType.match(/charset=([^;\s]+)/i)?.[1]?.replaceAll('"', "").toLowerCase() ?? "utf-8";

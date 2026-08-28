@@ -29,7 +29,7 @@ zap-cli product similar <model-id-or-url>
 zap-cli product images <model-id-or-url>
 zap-cli product local-stores <model-id-or-url>
 zap-cli product compare <model-id> <model-id>
-zap-cli product raw <model-id> --resource model
+zap-cli product raw <model-id> --resource model --output zap-model.html
 ```
 
 Search keeps canonical models and featured store offers separate; sponsored bids are opt-in. Offer output keeps regular, Eilat, and refurbished markets separate and reports total price, structured importer status, warranty, and seller reputation. Use `--details` for full merchant descriptions.
