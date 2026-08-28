@@ -7,7 +7,7 @@ import { searchStores, storeMetadata, storeReviews } from "./core/stores.js";
 import { suggestions } from "./core/suggestions.js";
 import { toYaml } from "./format.js";
 
-const program = new Command().name("zap-cli").description("CLI for searching and reading Zap Israel").version("0.2.1").showHelpAfterError();
+const program = new Command().name("zap-cli").description("CLI for searching and reading Zap Israel").version("0.2.2").showHelpAfterError();
 const output = async (work: Promise<unknown>): Promise<void> => { process.stdout.write(`${toYaml(await work)}\n`); };
 const positive = (value: string): number => { const result = Number(value); if (!Number.isInteger(result) || result < 1) throw new Error("value must be a positive integer"); return result; };
 
@@ -43,7 +43,8 @@ product.command("similar <model>").description("List similar products").option("
 product.command("compare <models...>").description("Compare two to four products").action((models) => output(compareProducts(models)));
 product.command("raw <model>").description("Save an unmodified Zap HTML page for unsupported fields")
   .addOption(new Option("--resource <page>", "page to save").choices(["model", "specs", "reviews", "local-stores"]).default("model"))
-  .action((model, options) => output(rawProductPage(model, options.resource)));
+  .option("--output <path>", "output file; defaults to the OS temporary directory")
+  .action((model, options) => output(rawProductPage(model, options.resource, options.output)));
 
 const category = program.command("category").description("Category operations");
 category.command("list [query]").description("List Zap product categories").action((query = "") => output(listCategories(query)));
