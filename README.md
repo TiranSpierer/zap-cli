@@ -4,6 +4,8 @@ CLI for searching and reading [Zap](https://www.zap.co.il), Israel's price-compa
 
 ## Install
 
+Recommended: install [`israel-shopping`](https://github.com/TiranSpierer/agent-plugins) from the agent plugin marketplace.
+
 ```bash
 npx -y git+https://github.com/TiranSpierer/zap-cli.git zap-cli --help
 ```
