@@ -34,6 +34,8 @@ zap-cli product raw <model-id> --resource model --output zap-model.html
 
 Search keeps canonical models and featured store offers separate; sponsored bids are opt-in. Offer output keeps regular, Eilat, and refurbished markets separate and reports total price, structured importer status, warranty, and seller reputation. Use `--details` for full merchant descriptions.
 
+Zap may group different bundles, conditions, or warranties under one model. `importer: unknown` means Zap's structured fields do not identify the importer; the CLI does not infer it from seller-written text.
+
 </details>
 
 <details>

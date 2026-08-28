@@ -273,7 +273,7 @@ export async function productOffers(model: string, options: { market: string; so
   if (!(options.market in markets) && options.market !== "all") markets[options.market] = [];
   if (options.market === "all") for (const market of ["regular", "refurbish", "eilat"]) markets[market] ??= [];
   const values = Object.values(markets).flat().filter((value) => typeof value === "object");
-  return { model_id: id, markets, returned: Object.fromEntries(Object.entries(markets).map(([key, items]) => [key, items.length])), anomalies_excluded: Object.keys(anomaliesExcluded).length ? anomaliesExcluded : undefined, comparison_note: values.length ? "Zap may group different bundles, accessories, conditions, or warranties under one model; verify each offer before comparing totals." : undefined, importer_note: values.some((offer: any) => offer.importer === "unknown") ? "Zap's structured importer flags do not identify these offers; status is unknown and is not inferred from marketing text." : undefined, note: values.length === 0 ? "No offers found for the selected market." : undefined, url: `${BASE_URL}/model.aspx?modelid=${id}` };
+  return { model_id: id, markets, returned: Object.fromEntries(Object.entries(markets).map(([key, items]) => [key, items.length])), anomalies_excluded: Object.keys(anomaliesExcluded).length ? anomaliesExcluded : undefined, note: values.length === 0 ? "No offers found for the selected market." : undefined, url: `${BASE_URL}/model.aspx?modelid=${id}` };
 }
 
 export async function productSpecs(model: string): Promise<unknown> {

@@ -7,7 +7,7 @@ import { searchStores, storeMetadata, storeReviews } from "./core/stores.js";
 import { suggestions } from "./core/suggestions.js";
 import { toYaml } from "./format.js";
 
-const program = new Command().name("zap-cli").description("CLI for searching and reading Zap Israel").version("0.2.2").showHelpAfterError();
+const program = new Command().name("zap-cli").description("CLI for searching and reading Zap Israel").version("0.2.3").showHelpAfterError();
 const output = async (work: Promise<unknown>): Promise<void> => { process.stdout.write(`${toYaml(await work)}\n`); };
 const positive = (value: string): number => { const result = Number(value); if (!Number.isInteger(result) || result < 1) throw new Error("value must be a positive integer"); return result; };
 
@@ -34,6 +34,7 @@ product.command("offers <model>").description("List store offers for a product")
   .option("--limit <number>", "maximum offers per market", positive, 20)
   .option("--details", "include full merchant descriptions")
   .option("--include-anomalies", "include extreme price outliers that may be mismatched accessories")
+  .addHelpText("after", "\nNotes:\n  Zap may group different bundles, conditions, or warranties under one model.\n  importer: unknown means Zap's structured fields do not identify the importer; seller text is not inferred.\n")
   .action((model, options) => output(productOffers(model, options)));
 product.command("reviews <model>").description("Read product reviews").option("--page <number>", "review page", positive, 1)
   .option("--limit <number>", "maximum reviews", positive, 10)
