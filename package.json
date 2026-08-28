@@ -1,0 +1,26 @@
+{
+  "name": "zap-cli",
+  "version": "0.1.0",
+  "description": "CLI for searching and reading Zap Israel price-comparison data",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": { "zap-cli": "dist/index.js" },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "tsc && node -e \"require('fs').chmodSync('dist/index.js',0o755)\"",
+    "test": "npm run build && node --test tests/*.test.js",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "commander": "^14.0.0",
+    "iconv-lite": "^0.7.0",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  }
+}
