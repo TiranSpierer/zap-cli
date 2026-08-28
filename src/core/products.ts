@@ -5,6 +5,7 @@ import { load, type Cheerio, type CheerioAPI } from "cheerio";
 import type { AnyNode } from "domhandler";
 import { request } from "./client.js";
 import { BASE_URL, clean, extractId, numeric, prune, text } from "./common.js";
+import { categoryFilters } from "./categories.js";
 
 const SORTS: Record<string, string> = { new: "snum", price: "price", "price-desc": "price_desc", rating: "rate", reviews: "ratesum" };
 
@@ -53,8 +54,17 @@ export async function searchProducts(args: {
   const query = args.query.trim();
   if (!query && !args.category) throw new Error("provide a query or --category");
   if (args.filters.length && !args.category) throw new Error("--filter requires --category");
+  if (args.category && args.filters.length) args = { ...args, filters: await resolveFilters(args.category, query || undefined, args.filters) };
   const first = await searchPage({ ...args, query });
+  if (args.category) {
+    const resolved = new URL(first.url);
+    for (const filter of args.filters) {
+      const [group, value] = filter.split("=", 2); const actual = resolved.searchParams.get(`db${group.replace(/^db/, "")}`);
+      if (!actual || new Set(actual.split(",")).size !== new Set(value.split(",")).size || value.split(",").some((item) => !actual.split(",").includes(item))) throw new Error(`Zap rejected filter ${filter}; refresh category filters`);
+    }
+  }
   const models = new Map<string, any>();
+  const searchTexts = new Map<string, string>();
   const featuredOffers = new Map<string, any>();
   const sponsored = new Map<string, any>();
   let current = first;
@@ -73,7 +83,7 @@ export async function searchProducts(args: {
     const rows = current.$(".model-row-v2.withModelRow");
     rows.each((_, element) => {
       const value = modelSummary(current.$, current.$(element)) as any;
-      if (value?.model_id) models.set(value.model_id, value);
+      if (value?.model_id) { models.set(value.model_id, value); searchTexts.set(value.model_id, clean(current.$(element).find(".card-v2__row-params").text())); }
     });
     current.$(".model-row-v2.noModelRow").each((_, element) => {
       const row = current.$(element); const value = modelSummary(current.$, row) as any; const offerId = value?.model_id;
@@ -98,6 +108,11 @@ export async function searchProducts(args: {
   }
   const totalText = clean(first.$(".categories-count-results").first().text());
   let modelValues = [...models.values()];
+  if (args.sort === "popular" && query) {
+    const tokens = clean(query).toLowerCase().split(/\s+/).filter((token) => token.length > 1);
+    const score = (item: any) => { const name = `${clean(item.name)} ${searchTexts.get(item.model_id) ?? ""}`.toLowerCase(); const penalties = ["pro", "max", "ultra", "plus", " ti"].filter((token) => name.includes(token) && !clean(query).toLowerCase().includes(token.trim())).length; return (name.includes(clean(query).toLowerCase()) ? 100 : 0) + tokens.filter((token) => name.includes(token)).length - penalties * 2; };
+    modelValues.sort((a, b) => score(b) - score(a));
+  }
   if (args.sort === "price") modelValues.sort((a, b) => (a.price_from ?? Infinity) - (b.price_from ?? Infinity));
   if (args.sort === "price-desc") modelValues.sort((a, b) => (b.price_from ?? -Infinity) - (a.price_from ?? -Infinity));
   const output: Record<string, unknown> = {
@@ -118,6 +133,25 @@ export async function searchProducts(args: {
     output.fallback = { query: fallbackQuery, ...(fallback as object) };
   }
   return output;
+}
+
+async function resolveFilters(category: string, query: string | undefined, filters: string[]): Promise<string[]> {
+  if (filters.every((filter) => /^(?:db)?\d+=/.test(filter))) return filters;
+  const data = await categoryFilters(category, query, false) as any;
+  const aliases: Record<string, string> = { brand: "מותג", price: "טווח מחירים" };
+  return filters.map((filter) => {
+    const [requestedGroup, requestedValue] = filter.split("=", 2);
+    if (!requestedGroup || !requestedValue) throw new Error("filters must use GROUP=OPTION[,OPTION]");
+    const groupName = aliases[requestedGroup.toLowerCase()] ?? requestedGroup;
+    const group = (data.filter_groups ?? []).find((item: any) => clean(item.name).toLowerCase() === clean(groupName).toLowerCase() || item.id === requestedGroup.replace(/^db/, ""));
+    if (!group) throw new Error(`unknown filter group "${requestedGroup}"; run category filters first`);
+    const values = requestedValue.split(",").map((value) => {
+      const option = group.options.find((item: any) => item.id === value || clean(item.name).toLowerCase() === clean(value).toLowerCase());
+      if (!option) throw new Error(`unknown ${group.name} option "${value}"; run category filters first`);
+      return option.id;
+    });
+    return `${group.id}=${values.join(",")}`;
+  });
 }
 
 export async function resolveModel(value: string): Promise<string> {
@@ -153,6 +187,7 @@ function offerFrom($: CheerioAPI, row: Cheerio<AnyNode>, market: string, details
   const official = row.attr("data-official-importer") === "true";
   const parallel = row.attr("data-parallel-importer") === "true";
   const warranty = row.attr("data-warranty-company");
+  const warrantyLabel = !warranty || warranty === "-2" ? "unknown" : /^\d+$/.test(warranty) ? `${warranty} (unit not provided by Zap)` : warranty;
   const zapHref = row.find('a[href*="/fs"], a[href*="shop.zap.co.il/product-model"]').first().attr("href");
   return prune({
     offer_id: row.attr("data-pid"), gid: row.attr("data-gid"), store: row.attr("data-site-name"),
@@ -162,7 +197,7 @@ function offerFrom($: CheerioAPI, row: Cheerio<AnyNode>, market: string, details
     description: details ? row.attr("data-description") : undefined, tag: row.attr("data-marketing-tags"),
     store_rating: numeric(row.attr("data-total-rank")), store_rating_display: numeric(row.attr("data-site-rate")),
     store_reviews_last_year: numeric(row.attr("data-review-last-year")), store_reviews_total: numeric(row.attr("data-review-total")),
-    warranty: warranty && warranty !== "-2" ? warranty : "unknown",
+    warranty: warrantyLabel,
     importer: official ? "official" : parallel ? "parallel" : "unknown",
     official_warranty: row.attr("data-official-warranty") === "true" ? true : undefined,
     market, zap_url: zapHref ? new URL(zapHref, BASE_URL).toString() : undefined,
@@ -197,7 +232,9 @@ export async function productOffers(model: string, options: { market: string; so
     markets[market] = offers.slice(0, options.limit);
   });
   if (!(options.market in markets) && options.market !== "all") markets[options.market] = [];
-  return { model_id: id, markets, note: Object.values(markets).every((items) => items.length === 0) ? "No offers found for the selected market." : undefined, url: `${BASE_URL}/model.aspx?modelid=${id}` };
+  if (options.market === "all") for (const market of ["regular", "refurbish", "eilat"]) markets[market] ??= [];
+  const values = Object.values(markets).flat();
+  return { model_id: id, markets, returned: Object.fromEntries(Object.entries(markets).map(([key, items]) => [key, items.length])), importer_note: values.some((offer: any) => offer.importer === "unknown") ? "Zap's structured importer flags do not identify these offers; status is unknown and is not inferred from marketing text." : undefined, note: values.length === 0 ? "No offers found for the selected market." : undefined, url: `${BASE_URL}/model.aspx?modelid=${id}` };
 }
 
 export async function productSpecs(model: string): Promise<unknown> {

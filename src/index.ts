@@ -3,7 +3,7 @@ import { Command, Option } from "commander";
 import { categoryFilters, listCategories } from "./core/categories.js";
 import { compareProducts, localStores, productHistory, productImages, productMetadata, productOffers, productSpecs, rawProductPage, searchProducts, similarProducts } from "./core/products.js";
 import { productReviews } from "./core/reviews.js";
-import { storeMetadata, storeReviews } from "./core/stores.js";
+import { searchStores, storeMetadata, storeReviews } from "./core/stores.js";
 import { suggestions } from "./core/suggestions.js";
 import { toYaml } from "./format.js";
 
@@ -14,9 +14,9 @@ const positive = (value: string): number => { const result = Number(value); if (
 const product = program.command("product").description("Product operations");
 product.command("search [query]").description("Search Zap products")
   .option("--category <code>", "Zap category code, such as e-tv")
-  .option("--page <number>", "result page", positive, 1)
+  .option("--page <number>", "Zap result page; --limit truncates that page", positive, 1)
   .addOption(new Option("--sort <order>", "result order").choices(["popular", "new", "price", "price-desc", "rating", "reviews"]).default("popular"))
-  .option("--limit <number>", "maximum results", positive, 24)
+  .option("--limit <number>", "maximum models and store offers per result type", positive, 24)
   .option("--filter <selection>", "facet selection GROUP=OPTION[,OPTION]; repeatable", (value, previous: string[]) => previous.concat(value), [])
   .option("--all-pages", "fetch subsequent pages up to --limit")
   .option("--include-sponsored", "include sponsored bid placements")
@@ -46,9 +46,10 @@ product.command("raw <model>").description("Save an unmodified Zap HTML page for
 
 const category = program.command("category").description("Category operations");
 category.command("list [query]").description("List Zap product categories").action((query = "") => output(listCategories(query)));
-category.command("filters <category>").description("List filters for a category").option("--query <query>", "restrict facets to a query").option("--no-all-options", "return only initially visible options").action((code, options) => output(categoryFilters(code, options.query, options.allOptions)));
+category.command("filters <category>").description("List filters for a category").option("--query <query>", "restrict facets to a query").option("--all-options", "expand every option in each filter group").action((code, options) => output(categoryFilters(code, options.query, Boolean(options.allOptions))));
 
 const store = program.command("store").description("Store operations");
+store.command("search <query>").description("Search Zap stores by name").option("--limit <number>", "maximum stores", positive, 10).action((query, options) => output(searchStores(query, options.limit)));
 store.command("metadata <store>").description("Get Zap store metadata").action((id) => output(storeMetadata(id)));
 store.command("reviews <store>").description("Read Zap store reviews").option("--page <number>", "review page", positive, 1).option("--limit <number>", "maximum reviews", positive, 10).action((id, options) => output(storeReviews(id, options.page, options.limit)));
 
