@@ -7,7 +7,7 @@ import { searchStores, storeMetadata, storeReviews } from "./core/stores.js";
 import { suggestions } from "./core/suggestions.js";
 import { toYaml } from "./format.js";
 
-const program = new Command().name("zap-cli").description("CLI for searching and reading Zap Israel").version("0.2.0").showHelpAfterError();
+const program = new Command().name("zap-cli").description("CLI for searching and reading Zap Israel").version("0.2.1").showHelpAfterError();
 const output = async (work: Promise<unknown>): Promise<void> => { process.stdout.write(`${toYaml(await work)}\n`); };
 const positive = (value: string): number => { const result = Number(value); if (!Number.isInteger(result) || result < 1) throw new Error("value must be a positive integer"); return result; };
 
